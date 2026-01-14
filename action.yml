@@ -19,8 +19,8 @@ description: |-
 
 inputs:
   openai_api_key:
-    description: 'The API key for Qwen Code API (DashScope compatible).'
-    required: true
+    description: 'The API key for Qwen Code API (DashScope compatible). Required if oauth_credentials is not provided.'
+    required: false
   openai_base_url:
     description: 'The base URL for Qwen Code API endpoint.'
     required: false
@@ -29,6 +29,13 @@ inputs:
     description: 'The Qwen Code model to use.'
     required: false
     default: 'qwen-coder-plus-latest'
+  oauth_credentials:
+    description: 'OAuth credentials JSON for Qwen Code. If provided, will be written to ~/.qwen/oauth_creds.json. Mutually exclusive with openai_api_key.'
+    required: false
+  use_oauth:
+    description: 'Whether to use OAuth authentication instead of API key. When true, oauth_credentials must be provided.'
+    required: false
+    default: 'false'
   qwen_cli_version:
     description: 'The version of the Qwen Code to install. Can be "latest", "preview", "nightly", a specific version number, or a git branch, tag, or commit.'
     required: false
@@ -92,12 +99,25 @@ runs:
           fi
         }
 
-        # Validate that API key is provided
-        if [[ "${INPUT_OPENAI_API_KEY_PRESENT:-false}" != "true" ]]; then
-          warn "No API key provided. Please provide 'openai_api_key'."
+        # Validate authentication method
+        auth_methods=0
+        if [[ "${INPUT_OPENAI_API_KEY_PRESENT:-false}" == "true" ]]; then ((++auth_methods)); fi
+        if [[ "${INPUT_USE_OAUTH:-false}" == "true" ]]; then ((++auth_methods)); fi
+
+        if [[ "${auth_methods}" -eq 0 ]]; then
+          warn "No authentication method provided. Please provide either 'openai_api_key' or set 'use_oauth' to true with 'oauth_credentials'."
+        elif [[ "${auth_methods}" -gt 1 ]]; then
+          warn "Multiple authentication methods provided. Please use only one of: openai_api_key or OAuth."
+        fi
+
+        # Validate OAuth credentials if OAuth is enabled
+        if [[ "${INPUT_USE_OAUTH:-false}" == "true" ]] && [[ "${INPUT_OAUTH_CREDENTIALS_PRESENT:-false}" != "true" ]]; then
+          warn "OAuth is enabled but no oauth_credentials provided. Please provide 'oauth_credentials'."
         fi
       env:
         INPUT_OPENAI_API_KEY_PRESENT: "${{ inputs.openai_api_key != '' }}"
+        INPUT_USE_OAUTH: "${{ inputs.use_oauth }}"
+        INPUT_OAUTH_CREDENTIALS_PRESENT: "${{ inputs.oauth_credentials != '' }}"
 
     - name: 'Sanitize workflow name'
       id: 'sanitize_workflow_name'
@@ -107,6 +127,19 @@ runs:
         echo "gh_workflow_name=$SANITIZED" >> $GITHUB_OUTPUT
       env:
         WORKFLOW_NAME: '${{ inputs.workflow_name }}'
+
+    - name: 'Configure OAuth Credentials'
+      if: |-
+        ${{ inputs.use_oauth == 'true' && inputs.oauth_credentials != '' }}
+      run: |-
+        set -euo pipefail
+        mkdir -p ~/.qwen
+        echo "${OAUTH_CREDENTIALS}" > ~/.qwen/oauth_creds.json
+        chmod 600 ~/.qwen/oauth_creds.json
+        echo "OAuth credentials configured at ~/.qwen/oauth_creds.json"
+      shell: 'bash'
+      env:
+        OAUTH_CREDENTIALS: '${{ inputs.oauth_credentials }}'
 
     - name: 'Configure Qwen Code'
       if: |-
@@ -276,9 +309,9 @@ runs:
         fi
       env:
         DEBUG: '${{ fromJSON(inputs.qwen_debug || false) }}'
-        OPENAI_API_KEY: '${{ inputs.openai_api_key }}'
-        OPENAI_BASE_URL: ${{ inputs.openai_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1' }}
-        OPENAI_MODEL: ${{ inputs.openai_model || 'qwen-coder-plus-latest' }}
+        OPENAI_API_KEY: '${{ inputs.use_oauth != ''true'' && inputs.openai_api_key || '''' }}'
+        OPENAI_BASE_URL: ${{ inputs.use_oauth != 'true' && inputs.openai_base_url || '' }}
+        OPENAI_MODEL: ${{ inputs.use_oauth != 'true' && inputs.openai_model || 'qwen-coder-plus-latest' }}
         SURFACE: 'GitHub'
         PROMPT: '${{ inputs.prompt }}'
         GH_WORKFLOW_NAME: '${{ steps.sanitize_workflow_name.outputs.gh_workflow_name }}'
