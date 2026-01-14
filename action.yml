@@ -236,8 +236,14 @@ runs:
           echo "::warning::Qwen Code debug logging is enabled. This will stream responses, which could reveal sensitive information if processed with untrusted inputs."
         fi
 
+        # Build auth type flag if using OAuth
+        AUTH_TYPE_FLAG=""
+        if [[ "${USE_OAUTH}" == "true" ]]; then
+          AUTH_TYPE_FLAG="--auth-type qwen-oauth"
+        fi
+
         # We capture stdout (JSON) to TEMP_STDOUT and stderr to TEMP_STDERR
-        if ! qwen --yolo --prompt "${PROMPT}" --channel=CI --output-format json 2> "${TEMP_STDERR}" 1> "${TEMP_STDOUT}"; then
+        if ! qwen --yolo ${AUTH_TYPE_FLAG} --prompt "${PROMPT}" --channel=CI --output-format json 2> "${TEMP_STDERR}" 1> "${TEMP_STDOUT}"; then
           FAILED=true
         fi
 
@@ -309,6 +315,7 @@ runs:
         fi
       env:
         DEBUG: '${{ fromJSON(inputs.qwen_debug || false) }}'
+        USE_OAUTH: '${{ inputs.use_oauth }}'
         OPENAI_API_KEY: '${{ inputs.use_oauth != ''true'' && inputs.openai_api_key || '''' }}'
         OPENAI_BASE_URL: ${{ inputs.use_oauth != 'true' && inputs.openai_base_url || '' }}
         OPENAI_MODEL: ${{ inputs.use_oauth != 'true' && inputs.openai_model || 'qwen-coder-plus-latest' }}
